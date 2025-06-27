@@ -12,18 +12,10 @@ index 9f2b408c69..77d018ccf9 100644
            "objc/native/src/audio/voice_processing_audio_unit.mm",
          ]
 diff --git a/sdk/objc/components/audio/RTCAudioSession+Configuration.mm b/sdk/objc/components/audio/RTCAudioSession+Configuration.mm
-index 7267a79334..85cc6299cc 100644
+index 7267a79334..bec80e9c3c 100644
 --- a/sdk/objc/components/audio/RTCAudioSession+Configuration.mm
 +++ b/sdk/objc/components/audio/RTCAudioSession+Configuration.mm
-@@ -8,6 +8,7 @@
-  *  be found in the AUTHORS file in the root of the source tree.
-  */
- 
-+#include <AVFAudio/AVFAudio.h>
- #import "RTCAudioSession+Private.h"
- #import "RTCAudioSessionConfiguration.h"
- 
-@@ -147,6 +148,80 @@
+@@ -147,6 +147,80 @@
      }
    }
  
@@ -184,7 +176,7 @@ index 7dcffb07d5..19b6ddcb47 100644
    // the playout and recording sides. These structure is set in two steps:
    // first, native sample rate and #channels are defined in Init(). Next, the
 diff --git a/sdk/objc/native/src/audio/audio_device_ios.mm b/sdk/objc/native/src/audio/audio_device_ios.mm
-index 5d7a1ea628..9a56a3e9b8 100644
+index 5d7a1ea628..2e382314fc 100644
 --- a/sdk/objc/native/src/audio/audio_device_ios.mm
 +++ b/sdk/objc/native/src/audio/audio_device_ios.mm
 @@ -33,6 +33,7 @@
@@ -199,8 +191,8 @@ index 5d7a1ea628..9a56a3e9b8 100644
        render_error_handler_(render_error_handler),
        disregard_next_render_error_(false),
        audio_device_buffer_(nullptr),
-+	  play_channels_(N_PLAY_CHANNELS),
-+	  rec_channels_(N_REC_CHANNELS),
++      play_channels_(N_PLAY_CHANNELS),
++      rec_channels_(N_REC_CHANNELS),
        audio_unit_(nullptr),
        recording_(0),
        playing_(0),
@@ -222,14 +214,13 @@ index 5d7a1ea628..9a56a3e9b8 100644
    audio_buffer->mDataByteSize =
        record_audio_buffer_.size() * VoiceProcessingAudioUnit::kBytesPerSample;
    audio_buffer->mData = reinterpret_cast<int8_t*>(record_audio_buffer_.data());
-@@ -466,15 +469,16 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
+@@ -466,15 +469,14 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
                                            AudioBufferList* io_data) {
    RTC_DCHECK_RUN_ON(&io_thread_checker_);
    // Verify 16-bit, noninterleaved mono PCM signal format.
 -  RTC_DCHECK_EQ(1, io_data->mNumberBuffers);
-+  // RTC_DCHECK_EQ(1, io_data->mNumberBuffers);
    AudioBuffer* audio_buffer = &io_data->mBuffers[0];
-   RTC_DCHECK_EQ(1, audio_buffer->mNumberChannels);
+-  RTC_DCHECK_EQ(1, audio_buffer->mNumberChannels);
 +  RTC_DCHECK_EQ(audio_buffer->mNumberChannels, play_channels_);
  
    // Produce silence and give audio unit a hint about it if playout is not
@@ -241,7 +232,7 @@ index 5d7a1ea628..9a56a3e9b8 100644
                   num_frames);
      *flags |= kAudioUnitRenderAction_OutputIsSilence;
      memset(static_cast<int8_t*>(audio_buffer->mData), 0, size_in_bytes);
-@@ -534,7 +538,7 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
+@@ -534,7 +536,7 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
    // `io_data` destination.
    fine_audio_buffer_->GetPlayoutData(
        webrtc::ArrayView<int16_t>(static_cast<int16_t*>(audio_buffer->mData),
@@ -250,7 +241,7 @@ index 5d7a1ea628..9a56a3e9b8 100644
        playout_delay_ms);
  
    last_hw_output_latency_update_sample_count_ += num_frames;
-@@ -746,8 +750,6 @@ void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
+@@ -746,8 +748,6 @@ void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
    RTC_DCHECK(audio_device_buffer_) << "AttachAudioBuffer must be called first";
    RTC_DCHECK_GT(playout_parameters_.sample_rate(), 0);
    RTC_DCHECK_GT(record_parameters_.sample_rate(), 0);
@@ -259,7 +250,7 @@ index 5d7a1ea628..9a56a3e9b8 100644
    // Inform the audio device buffer (ADB) about the new audio format.
    audio_device_buffer_->SetPlayoutSampleRate(playout_parameters_.sample_rate());
    audio_device_buffer_->SetPlayoutChannels(playout_parameters_.channels());
-@@ -822,8 +824,13 @@ bool AudioDeviceIOS::CreateAudioUnit() {
+@@ -822,8 +822,13 @@ bool AudioDeviceIOS::CreateAudioUnit() {
      return false;
    }
    BOOL detect_mute_speech_ = (muted_speech_event_handler_ != 0);
@@ -275,7 +266,7 @@ index 5d7a1ea628..9a56a3e9b8 100644
    if (!audio_unit_->Init()) {
      audio_unit_.reset();
      return false;
-@@ -1180,32 +1187,54 @@ int32_t AudioDeviceIOS::MicrophoneMute(bool& enabled) const {
+@@ -1180,32 +1185,54 @@ int32_t AudioDeviceIOS::MicrophoneMute(bool& enabled) const {
  }
  
  int32_t AudioDeviceIOS::StereoRecordingIsAvailable(bool& available) {
@@ -291,7 +282,7 @@ index 5d7a1ea628..9a56a3e9b8 100644
 -  RTC_LOG_F(LS_WARNING) << "Not implemented";
 -  return -1;
 +  if (enable)
-+	rec_channels_ = 2;
++    rec_channels_ = 2;
 +  else
 +    rec_channels_ = 1;
 +
@@ -312,8 +303,8 @@ index 5d7a1ea628..9a56a3e9b8 100644
 -  available = false;
 +  // 本当は audio_unit_ によって使い分けるべきだが、
 +  // この段階では audio_unit_ が初期化されていないので、
-+  // record_parameters_ を使う。
-+  available = record_parameters_.channels() == 2;
++  // playout_parameters_ を使う。
++  available = playout_parameters_.channels() == 2;
    return 0;
  }
  
@@ -321,16 +312,16 @@ index 5d7a1ea628..9a56a3e9b8 100644
 -  RTC_LOG_F(LS_WARNING) << "Not implemented";
 -  return -1;
 +  if (enable)
-+	rec_channels_ = 2;
++    play_channels_ = 2;
 +  else
-+    rec_channels_ = 1;
++    play_channels_ = 1;
 +
 +  return 0;
  }
  
  int32_t AudioDeviceIOS::StereoPlayout(bool& enabled) const {
 -  enabled = false;
-+  if (rec_channels_ == 2)
++  if (play_channels_ == 2)
 +    enabled = true;
 +  else
 +    enabled = false;
