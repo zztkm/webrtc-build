@@ -12,18 +12,18 @@ index 9f2b408c69..77d018ccf9 100644
            "objc/native/src/audio/voice_processing_audio_unit.mm",
          ]
 diff --git a/sdk/objc/components/audio/RTCAudioSession+Configuration.mm b/sdk/objc/components/audio/RTCAudioSession+Configuration.mm
-index 7267a79334..bec80e9c3c 100644
+index 7267a79334..ecaf438b48 100644
 --- a/sdk/objc/components/audio/RTCAudioSession+Configuration.mm
 +++ b/sdk/objc/components/audio/RTCAudioSession+Configuration.mm
-@@ -147,6 +147,80 @@
-     }
-   }
+@@ -111,10 +111,47 @@
  
-+  if (self.isActive &&
+   if (self.isActive &&
+       // TODO(tkchin): Figure out which category/mode numChannels is valid for.
+-      [self.mode isEqualToString:AVAudioSessionModeVoiceChat]) {
 +      [self.mode isEqualToString:AVAudioSessionModeDefault]) {
-+    // Try to set the preferred number of hardware audio channels. These calls
-+    // must be done after setting the audio session’s category and mode and
-+    // activating the session.
+     // Try to set the preferred number of hardware audio channels. These calls
+     // must be done after setting the audio session’s category and mode and
+     // activating the session.
 +    if (self.inputDataSources != nil) {
 +      for (AVAudioSessionDataSourceDescription *dataSource in self.inputDataSources) {
 +        RTCLog(@"Found data source: %@", dataSource.dataSourceName);
@@ -61,41 +61,9 @@ index 7267a79334..bec80e9c3c 100644
 +      RTCLog(@"No input data sources available.");
 +    }
 +
-+    NSInteger inputNumberOfChannels = configuration.inputNumberOfChannels;
-+    if (self.inputNumberOfChannels != inputNumberOfChannels) {
-+      NSError *inputChannelsError = nil;
-+      if (![self setPreferredInputNumberOfChannels:inputNumberOfChannels
-+                                             error:&inputChannelsError]) {
-+        RTCLogError(@"Failed to set preferred input number of channels: %@",
-+                    inputChannelsError.localizedDescription);
-+        if (!self.ignoresPreferredAttributeConfigurationErrors) {
-+          error = inputChannelsError;
-+        }
-+      } else {
-+        RTCLog(@"Set input number of channels to: %ld",
-+               (long)inputNumberOfChannels);
-+      }
-+    }
-+    NSInteger outputNumberOfChannels = configuration.outputNumberOfChannels;
-+    if (self.outputNumberOfChannels != outputNumberOfChannels) {
-+      NSError *outputChannelsError = nil;
-+      if (![self setPreferredOutputNumberOfChannels:outputNumberOfChannels
-+                                              error:&outputChannelsError]) {
-+        RTCLogError(@"Failed to set preferred output number of channels: %@",
-+                    outputChannelsError.localizedDescription);
-+        if (!self.ignoresPreferredAttributeConfigurationErrors) {
-+          error = outputChannelsError;
-+        }
-+      } else {
-+        RTCLog(@"Set output number of channels to: %ld",
-+               (long)outputNumberOfChannels);
-+      }
-+    }
-+  }
-+
-   if (outError) {
-     *outError = error;
-   }
+     NSInteger inputNumberOfChannels = configuration.inputNumberOfChannels;
+     if (self.inputNumberOfChannels != inputNumberOfChannels) {
+       NSError *inputChannelsError = nil;
 diff --git a/sdk/objc/components/audio/RTCAudioSession.h b/sdk/objc/components/audio/RTCAudioSession.h
 index 47a60074dc..45eda6987c 100644
 --- a/sdk/objc/components/audio/RTCAudioSession.h
@@ -129,31 +97,25 @@ index 7678b9c4b5..07201a2290 100644
  
  - (void)handleInterruptionNotification:(NSNotification *)notification {
 diff --git a/sdk/objc/components/audio/RTCAudioSessionConfiguration.m b/sdk/objc/components/audio/RTCAudioSessionConfiguration.m
-index 143a7864f8..0c4170decd 100644
+index 143a7864f8..47a0083ce0 100644
 --- a/sdk/objc/components/audio/RTCAudioSessionConfiguration.m
 +++ b/sdk/objc/components/audio/RTCAudioSessionConfiguration.m
-@@ -63,6 +63,8 @@ static RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *gWebRTCConfiguration = nil;
+@@ -63,7 +63,9 @@ static RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *gWebRTCConfiguration = nil;
      _categoryOptions = AVAudioSessionCategoryOptionAllowBluetooth;
  
      // Specify mode for two-way voice communication (e.g. VoIP).
+-    _mode = AVAudioSessionModeVoiceChat;
 +    // TODO(zztkm): _mode を AVAudioSessionModeVoiceChat から AVAudioSessionModeDefault に切り替えた場合の影響を確認する
 +    // NOTE: AVAudioSessionModeDefault への変更をユーザーサイドでやれるのであればそっちが良さそう(zztkm)
-     _mode = AVAudioSessionModeVoiceChat;
++    _mode = AVAudioSessionModeDefault;
  
      // Use best sample rate and buffer duration if the CPU has more than one
+     // core.
 diff --git a/sdk/objc/native/src/audio/audio_device_ios.h b/sdk/objc/native/src/audio/audio_device_ios.h
-index 7dcffb07d5..19b6ddcb47 100644
+index 7dcffb07d5..320a7ce7fd 100644
 --- a/sdk/objc/native/src/audio/audio_device_ios.h
 +++ b/sdk/objc/native/src/audio/audio_device_ios.h
-@@ -12,6 +12,7 @@
- #define SDK_OBJC_NATIVE_SRC_AUDIO_AUDIO_DEVICE_IOS_H_
- 
- #include <atomic>
-+#include <cstdint>
- #include <memory>
- 
- #include "api/environment/environment.h"
-@@ -34,6 +35,11 @@ class FineAudioBuffer;
+@@ -34,6 +34,11 @@ class FineAudioBuffer;
  
  namespace ios_adm {
  
@@ -165,7 +127,7 @@ index 7dcffb07d5..19b6ddcb47 100644
  // A callback handler for audio device rendering errors.
  // Note: Called on a realtime thread.
  // Note: Only applies to input rendering errors, not output.
-@@ -249,6 +255,9 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
+@@ -249,6 +254,9 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
    // and therefore outlives this object.
    AudioDeviceBuffer* audio_device_buffer_;
  
@@ -176,14 +138,14 @@ index 7dcffb07d5..19b6ddcb47 100644
    // the playout and recording sides. These structure is set in two steps:
    // first, native sample rate and #channels are defined in Init(). Next, the
 diff --git a/sdk/objc/native/src/audio/audio_device_ios.mm b/sdk/objc/native/src/audio/audio_device_ios.mm
-index 5d7a1ea628..2e382314fc 100644
+index 5d7a1ea628..c952bc1e9a 100644
 --- a/sdk/objc/native/src/audio/audio_device_ios.mm
 +++ b/sdk/objc/native/src/audio/audio_device_ios.mm
 @@ -33,6 +33,7 @@
  #import "components/audio/RTCAudioSession.h"
  #import "components/audio/RTCAudioSessionConfiguration.h"
  #import "components/audio/RTCNativeAudioSessionDelegateAdapter.h"
-+#import "remote_io_audio_unit.h"
++#include "remote_io_audio_unit.h"
  
  namespace webrtc {
  namespace ios_adm {
@@ -250,9 +212,20 @@ index 5d7a1ea628..2e382314fc 100644
    // Inform the audio device buffer (ADB) about the new audio format.
    audio_device_buffer_->SetPlayoutSampleRate(playout_parameters_.sample_rate());
    audio_device_buffer_->SetPlayoutChannels(playout_parameters_.channels());
-@@ -822,8 +822,13 @@ bool AudioDeviceIOS::CreateAudioUnit() {
-     return false;
-   }
+@@ -817,13 +817,20 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
+ 
+ bool AudioDeviceIOS::CreateAudioUnit() {
+   RTC_DCHECK(!audio_unit_);
+-  RTC_DCHECK(!audio_is_initialized_);
+-  if (audio_unit_ || audio_is_initialized_) {
+-    return false;
+-  }
++  // TODO(zztkm) これもしかして不要？
++  // RTC_DCHECK(!audio_is_initialized_);
++  // TODO(zztkm) これもしかして不要？
++  // if (audio_unit_ || audio_is_initialized_) {
++  //   return false;
++  // }
    BOOL detect_mute_speech_ = (muted_speech_event_handler_ != 0);
 -  audio_unit_.reset(new VoiceProcessingAudioUnit(
 -      bypass_voice_processing_, detect_mute_speech_, this));
@@ -266,7 +239,7 @@ index 5d7a1ea628..2e382314fc 100644
    if (!audio_unit_->Init()) {
      audio_unit_.reset();
      return false;
-@@ -1180,32 +1185,54 @@ int32_t AudioDeviceIOS::MicrophoneMute(bool& enabled) const {
+@@ -1180,32 +1187,54 @@ int32_t AudioDeviceIOS::MicrophoneMute(bool& enabled) const {
  }
  
  int32_t AudioDeviceIOS::StereoRecordingIsAvailable(bool& available) {
