@@ -1,0 +1,660 @@
+diff --git a/sdk/BUILD.gn b/sdk/BUILD.gn
+index 9f2b408c69..52e35f1c7b 100644
+--- a/sdk/BUILD.gn
++++ b/sdk/BUILD.gn
+@@ -975,6 +975,12 @@ if (is_ios || is_mac) {
+         "objc/api/peerconnection/RTCAudioSource+Private.h",
+         "objc/api/peerconnection/RTCAudioSource.h",
+         "objc/api/peerconnection/RTCAudioSource.mm",
++        "objc/api/peerconnection/RTCAudioSink.h",
++        "objc/api/peerconnection/RTCAudioSink.mm",
++        "objc/api/peerconnection/RTCAudioSinkAdapter.h",
++        "objc/api/peerconnection/RTCAudioSinkAdapter+Private.h",
++        "objc/api/peerconnection/RTCAudioSinkAdapter.mm",
++        "objc/api/peerconnection/RTCAudioTrack+AudioSink.h",
+         "objc/api/peerconnection/RTCAudioTrack+Private.h",
+         "objc/api/peerconnection/RTCAudioTrack.h",
+         "objc/api/peerconnection/RTCAudioTrack.mm",
+@@ -1364,6 +1370,7 @@ if (is_ios || is_mac) {
+           "objc/helpers/RTCCameraPreviewView.h",
+           "objc/helpers/RTCDispatcher.h",
+           "objc/helpers/UIDevice+RTCDevice.h",
++          "objc/api/peerconnection/RTCAudioSink.h",
+           "objc/api/peerconnection/RTCAudioSource.h",
+           "objc/api/peerconnection/RTCAudioTrack.h",
+           "objc/api/peerconnection/RTCConfiguration.h",
+@@ -1488,6 +1495,7 @@ if (is_ios || is_mac) {
+         output_name = "WebRTC"
+ 
+         sources = [
++          "objc/api/peerconnection/RTCAudioSink.h",
+           "objc/api/peerconnection/RTCAudioSource.h",
+           "objc/api/peerconnection/RTCAudioTrack.h",
+           "objc/api/peerconnection/RTCCertificate.h",
+diff --git a/sdk/objc/api/peerconnection/RTCAudioSink.h b/sdk/objc/api/peerconnection/RTCAudioSink.h
+new file mode 100644
+index 0000000000..1c60b02ce1
+--- /dev/null
++++ b/sdk/objc/api/peerconnection/RTCAudioSink.h
+@@ -0,0 +1,52 @@
++/*
++ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#import <Foundation/Foundation.h>
++
++#import "sdk/objc/base/RTCMacros.h"
++
++NS_ASSUME_NONNULL_BEGIN
++
++/** 
++ * RTCAudioSink is a protocol for receiving audio data from an AudioTrack.
++ * The audio data is provided in PCM format.
++ */
++RTC_OBJC_EXPORT
++@protocol RTC_OBJC_TYPE(RTCAudioSink) <NSObject>
++
++/**
++ * Called when audio data is available.
++ *
++ * @param audioData Raw audio data in PCM format
++ * @param bitsPerSample Number of bits per sample (typically 16)
++ * @param sampleRate Sample rate in Hz (e.g., 44100, 48000)
++ * @param numberOfChannels Number of audio channels (1 for mono, 2 for stereo)
++ * @param numberOfFrames Number of audio frames in this buffer
++ * @param absoluteCaptureTimestampMs Optional timestamp when this audio frame was originally captured
++ */
++- (void)onAudioDataWithBuffer:(NSData *)audioData
++                bitsPerSample:(NSInteger)bitsPerSample
++                   sampleRate:(NSInteger)sampleRate
++            numberOfChannels:(NSUInteger)numberOfChannels
++             numberOfFrames:(NSUInteger)numberOfFrames
++    absoluteCaptureTimestamp:(nullable NSNumber *)absoluteCaptureTimestampMs;
++
++@optional
++
++/**
++ * Returns the number of channels preferred by the sink. 
++ * This can be less than the numberOfChannels if down-mixing should occur.
++ * A value of -1 means an unknown number.
++ */
++- (NSInteger)preferredChannelCount;
++
++@end
++
++NS_ASSUME_NONNULL_END
+\ No newline at end of file
+diff --git a/sdk/objc/api/peerconnection/RTCAudioSink.mm b/sdk/objc/api/peerconnection/RTCAudioSink.mm
+new file mode 100644
+index 0000000000..5f9ab91d6b
+--- /dev/null
++++ b/sdk/objc/api/peerconnection/RTCAudioSink.mm
+@@ -0,0 +1,12 @@
++/*
++ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++// This file is intentionally empty as RTCAudioSink is a protocol and does not require implementation.
++// The actual implementation is provided by classes conforming to the RTCAudioSink protocol.
+\ No newline at end of file
+diff --git a/sdk/objc/api/peerconnection/RTCAudioSinkAdapter+Private.h b/sdk/objc/api/peerconnection/RTCAudioSinkAdapter+Private.h
+new file mode 100644
+index 0000000000..c5f80954ae
+--- /dev/null
++++ b/sdk/objc/api/peerconnection/RTCAudioSinkAdapter+Private.h
+@@ -0,0 +1,41 @@
++/*
++ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#import "RTCAudioSinkAdapter.h"
++
++#import "RTCAudioSink.h"
++
++#include "api/media_stream_interface.h"
++
++NS_ASSUME_NONNULL_BEGIN
++
++@interface RTCAudioSinkAdapter ()
++
++/**
++ * The Objective-C audio sink passed to this adapter during construction.
++ * Calls made to the webrtc::AudioTrackSinkInterface will be adapted and passed to
++ * this audio sink.
++ */
++@property(nonatomic, readonly) id<RTC_OBJC_TYPE(RTCAudioSink)> audioSink;
++
++/**
++ * The native AudioTrackSinkInterface surface exposed by this adapter. Calls made
++ * to this interface will be adapted and passed to the RTCAudioSink supplied
++ * during construction. This pointer is unsafe and owned by this class.
++ */
++@property(nonatomic, readonly) webrtc::AudioTrackSinkInterface *nativeAudioSink;
++
++/** Initialize an RTCAudioSinkAdapter with an RTCAudioSink. */
++- (instancetype)initWithAudioSink:(id<RTC_OBJC_TYPE(RTCAudioSink)>)audioSink
++    NS_DESIGNATED_INITIALIZER;
++
++@end
++
++NS_ASSUME_NONNULL_END
+\ No newline at end of file
+diff --git a/sdk/objc/api/peerconnection/RTCAudioSinkAdapter.h b/sdk/objc/api/peerconnection/RTCAudioSinkAdapter.h
+new file mode 100644
+index 0000000000..2b29e43479
+--- /dev/null
++++ b/sdk/objc/api/peerconnection/RTCAudioSinkAdapter.h
+@@ -0,0 +1,27 @@
++/*
++ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#import <Foundation/Foundation.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++/**
++ * Creates a webrtc::AudioTrackSinkInterface surface for an RTCAudioSink. The
++ * webrtc::AudioTrackSinkInterface is used by WebRTC audio processing code - this
++ * adapter adapts calls made to that interface to the RTCAudioSink supplied
++ * during construction.
++ */
++@interface RTCAudioSinkAdapter : NSObject
++
++- (instancetype)init NS_UNAVAILABLE;
++
++@end
++
++NS_ASSUME_NONNULL_END
+\ No newline at end of file
+diff --git a/sdk/objc/api/peerconnection/RTCAudioSinkAdapter.mm b/sdk/objc/api/peerconnection/RTCAudioSinkAdapter.mm
+new file mode 100644
+index 0000000000..62bc5d53b8
+--- /dev/null
++++ b/sdk/objc/api/peerconnection/RTCAudioSinkAdapter.mm
+@@ -0,0 +1,161 @@
++/*
++ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++#import "RTCAudioSinkAdapter+Private.h"
++
++#include <memory>
++#include <optional>
++#include "rtc_base/logging.h"
++
++// Debug flag - set to NO for release builds
++static BOOL kRTCAudioSinkDebugLogging = YES;
++
++namespace webrtc {
++
++class AudioSinkAdapter : public AudioTrackSinkInterface {
++ public:
++  AudioSinkAdapter(RTCAudioSinkAdapter* adapter) {
++    adapter_ = adapter;
++    if (kRTCAudioSinkDebugLogging) {
++      RTC_LOG(LS_VERBOSE) << "[AudioSinkAdapter] C++ AudioSinkAdapter created"
++                          << " - Address: " << this;
++    }
++  }
++  
++  ~AudioSinkAdapter() {
++    if (kRTCAudioSinkDebugLogging) {
++      RTC_LOG(LS_VERBOSE) << "[AudioSinkAdapter] C++ AudioSinkAdapter destroyed"
++                          << " - Address: " << this;
++    }
++  }
++
++  void OnData(const void* audio_data,
++              int bits_per_sample,
++              int sample_rate,
++              size_t number_of_channels,
++              size_t number_of_frames) override {
++    OnData(audio_data, bits_per_sample, sample_rate, number_of_channels,
++           number_of_frames, std::nullopt);
++  }
++
++  void OnData(const void* audio_data,
++              int bits_per_sample,
++              int sample_rate,
++              size_t number_of_channels,
++              size_t number_of_frames,
++              std::optional<int64_t> absolute_capture_timestamp_ms) override {
++    static int call_count = 0;
++    
++    if (kRTCAudioSinkDebugLogging && call_count < 5) {
++      NSLog(@"[AudioSinkAdapter DEBUG] OnData called #%d", call_count + 1);
++      NSLog(@"[AudioSinkAdapter DEBUG] - Bits per sample: %d", bits_per_sample);
++      NSLog(@"[AudioSinkAdapter DEBUG] - Sample rate: %d Hz", sample_rate);
++      NSLog(@"[AudioSinkAdapter DEBUG] - Channels: %zu", number_of_channels);
++      NSLog(@"[AudioSinkAdapter DEBUG] - Frames: %zu", number_of_frames);
++      NSLog(@"[AudioSinkAdapter DEBUG] - Data size: %zu bytes", 
++            number_of_frames * number_of_channels * (bits_per_sample / 8));
++      
++      if (absolute_capture_timestamp_ms.has_value()) {
++        NSLog(@"[AudioSinkAdapter DEBUG] - Timestamp: %lld ms", 
++              absolute_capture_timestamp_ms.value());
++      }
++      
++      RTC_LOG(LS_VERBOSE) << "[AudioSinkAdapter] OnData #" << (call_count + 1)
++                          << " - Sample rate: " << sample_rate << " Hz"
++                          << " - Channels: " << number_of_channels
++                          << " - Frames: " << number_of_frames;
++      call_count++;
++      
++      if (call_count == 5) {
++        NSLog(@"[AudioSinkAdapter DEBUG] (Stopping logs after 5 calls to avoid spam)");
++        RTC_LOG(LS_VERBOSE) << "[AudioSinkAdapter] Stopping OnData logs after 5 calls";
++      }
++    }
++    
++    NSData* audioData = [NSData dataWithBytes:audio_data
++                                       length:number_of_frames * number_of_channels * (bits_per_sample / 8)];
++    
++    NSNumber* timestampMs = nil;
++    if (absolute_capture_timestamp_ms.has_value()) {
++      timestampMs = @(absolute_capture_timestamp_ms.value());
++    }
++    
++    [adapter_.audioSink onAudioDataWithBuffer:audioData
++                                bitsPerSample:bits_per_sample
++                                   sampleRate:sample_rate
++                            numberOfChannels:number_of_channels
++                             numberOfFrames:number_of_frames
++                    absoluteCaptureTimestamp:timestampMs];
++  }
++
++  int NumPreferredChannels() const override {
++    if ([adapter_.audioSink respondsToSelector:@selector(preferredChannelCount)]) {
++      int channels = (int)[adapter_.audioSink preferredChannelCount];
++      if (kRTCAudioSinkDebugLogging) {
++        static bool logged = false;
++        if (!logged) {
++          NSLog(@"[AudioSinkAdapter DEBUG] NumPreferredChannels called, returning: %d", channels);
++          RTC_LOG(LS_VERBOSE) << "[AudioSinkAdapter] NumPreferredChannels: " << channels;
++          logged = true;
++        }
++      }
++      return channels;
++    }
++    return -1;
++  }
++
++ private:
++  __weak RTCAudioSinkAdapter* adapter_;
++};
++
++}  // namespace webrtc
++
++@implementation RTCAudioSinkAdapter {
++  std::unique_ptr<webrtc::AudioSinkAdapter> _adapter;
++}
++
++@synthesize audioSink = _audioSink;
++
++- (instancetype)initWithAudioSink:(id<RTC_OBJC_TYPE(RTCAudioSink)>)audioSink {
++  NSParameterAssert(audioSink);
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSString *sinkClassName = NSStringFromClass([audioSink class]);
++    NSLog(@"[RTCAudioSinkAdapter DEBUG] ======== ADAPTER INIT START ========");
++    NSLog(@"[RTCAudioSinkAdapter DEBUG] Creating adapter for sink: %@", sinkClassName);
++    NSLog(@"[RTCAudioSinkAdapter DEBUG] Sink address: %p", audioSink);
++  }
++  
++  self = [super init];
++  if (self) {
++    _audioSink = audioSink;
++    _adapter.reset(new webrtc::AudioSinkAdapter(self));
++    
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioSinkAdapter DEBUG] Adapter self: %p", self);
++      NSLog(@"[RTCAudioSinkAdapter DEBUG] Native C++ adapter: %p", _adapter.get());
++      NSLog(@"[RTCAudioSinkAdapter DEBUG] ✅ Adapter successfully initialized");
++      NSLog(@"[RTCAudioSinkAdapter DEBUG] ======== ADAPTER INIT END ========");
++    }
++  }
++  return self;
++}
++
++- (void)dealloc {
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioSinkAdapter DEBUG] Adapter being deallocated: %p", self);
++  }
++}
++
++- (webrtc::AudioTrackSinkInterface*)nativeAudioSink {
++  return _adapter.get();
++}
++
++@end
+\ No newline at end of file
+diff --git a/sdk/objc/api/peerconnection/RTCAudioTrack+AudioSink.h b/sdk/objc/api/peerconnection/RTCAudioTrack+AudioSink.h
+new file mode 100644
+index 0000000000..6240425928
+--- /dev/null
++++ b/sdk/objc/api/peerconnection/RTCAudioTrack+AudioSink.h
+@@ -0,0 +1,13 @@
++/*
++ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
++ *
++ *  Use of this source code is governed by a BSD-style license
++ *  that can be found in the LICENSE file in the root of the source
++ *  tree. An additional intellectual property rights grant can be found
++ *  in the file PATENTS.  All contributing project authors may
++ *  be found in the AUTHORS file in the root of the source tree.
++ */
++
++// This file is intentionally empty. AudioSink functionality has been added 
++// directly to RTCAudioTrack interface. This file is kept as a placeholder 
++// for potential future AudioSink-related category methods.
+\ No newline at end of file
+diff --git a/sdk/objc/api/peerconnection/RTCAudioTrack.h b/sdk/objc/api/peerconnection/RTCAudioTrack.h
+index db8afb50fc..92b9dac197 100644
+--- a/sdk/objc/api/peerconnection/RTCAudioTrack.h
++++ b/sdk/objc/api/peerconnection/RTCAudioTrack.h
+@@ -14,6 +14,7 @@
+ NS_ASSUME_NONNULL_BEGIN
+ 
+ @class RTC_OBJC_TYPE(RTCAudioSource);
++@protocol RTC_OBJC_TYPE(RTCAudioSink);
+ 
+ RTC_OBJC_EXPORT
+ @interface RTC_OBJC_TYPE (RTCAudioTrack) : RTC_OBJC_TYPE(RTCMediaStreamTrack)
+@@ -23,6 +24,12 @@ RTC_OBJC_EXPORT
+ /** The audio source for this audio track. */
+ @property(nonatomic, readonly) RTC_OBJC_TYPE(RTCAudioSource) * source;
+ 
++/** Add a sink that will receive all audio data for this track. */
++- (void)addAudioSink:(id<RTC_OBJC_TYPE(RTCAudioSink)>)sink;
++
++/** Remove a previously added audio sink. */
++- (void)removeAudioSink:(id<RTC_OBJC_TYPE(RTCAudioSink)>)sink;
++
+ @end
+ 
+ NS_ASSUME_NONNULL_END
+diff --git a/sdk/objc/api/peerconnection/RTCAudioTrack.mm b/sdk/objc/api/peerconnection/RTCAudioTrack.mm
+index 5ba53c84e9..681db68e39 100644
+--- a/sdk/objc/api/peerconnection/RTCAudioTrack.mm
++++ b/sdk/objc/api/peerconnection/RTCAudioTrack.mm
+@@ -13,11 +13,20 @@
+ #import "RTCAudioSource+Private.h"
+ #import "RTCMediaStreamTrack+Private.h"
+ #import "RTCPeerConnectionFactory+Private.h"
++#import "RTCAudioSinkAdapter+Private.h"
+ #import "helpers/NSString+StdString.h"
+ 
+ #include "rtc_base/checks.h"
++#include "rtc_base/thread.h"
++#include <pthread.h>
+ 
+-@implementation RTC_OBJC_TYPE (RTCAudioTrack)
++// Debug flag - set to NO for release builds
++static BOOL kRTCAudioSinkDebugLogging = YES;
++
++@implementation RTC_OBJC_TYPE (RTCAudioTrack) {
++  webrtc::Thread *_workerThread;
++  NSMutableArray *_adapters /* accessed on _workerThread */;
++}
+ 
+ @synthesize source = _source;
+ 
+@@ -50,7 +59,18 @@
+   NSParameterAssert(factory);
+   NSParameterAssert(nativeTrack);
+   NSParameterAssert(type == RTCMediaStreamTrackTypeAudio);
+-  return [super initWithFactory:factory nativeTrack:nativeTrack type:type];
++  self = [super initWithFactory:factory nativeTrack:nativeTrack type:type];
++  if (self) {
++    _adapters = [NSMutableArray array];
++    _workerThread = factory.workerThread;
++  }
++  return self;
++}
++
++- (void)dealloc {
++  for (RTCAudioSinkAdapter *adapter in _adapters) {
++    self.nativeAudioTrack->RemoveSink(adapter.nativeAudioSink);
++  }
+ }
+ 
+ - (RTC_OBJC_TYPE(RTCAudioSource) *)source {
+@@ -66,6 +86,207 @@
+   return _source;
+ }
+ 
++- (void)addAudioSink:(id<RTC_OBJC_TYPE(RTCAudioSink)>)sink {
++  if (kRTCAudioSinkDebugLogging) {
++    NSString *sinkClassName = NSStringFromClass([sink class]);
++    NSString *threadName = [NSThread isMainThread] ? @"Main" : 
++                          [NSThread currentThread].name ?: @"Background";
++    pthread_t currentThread = pthread_self();
++    
++    NSLog(@"[RTCAudioTrack DEBUG] ======== ADD AUDIO SINK START ========");
++    NSLog(@"[RTCAudioTrack DEBUG] Called from thread: %@ (pthread: %p)", 
++          threadName, (void*)currentThread);
++    NSLog(@"[RTCAudioTrack DEBUG] Sink class: %@", sinkClassName);
++    NSLog(@"[RTCAudioTrack DEBUG] Sink address: %p", sink);
++    NSLog(@"[RTCAudioTrack DEBUG] Track ID: %@", 
++          [NSString stringWithUTF8String:self.nativeTrack->id().c_str()]);
++    
++    RTC_LOG(LS_VERBOSE) << "[addAudioSink] Called from Swift/ObjC"
++                        << " - Sink class: " << [sinkClassName UTF8String]
++                        << " - Thread: " << [threadName UTF8String];
++  }
++  
++  if (!_workerThread->IsCurrent()) {
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] Not on worker thread, dispatching...");
++      NSLog(@"[RTCAudioTrack DEBUG] Worker thread: %p, Current: %p", 
++            _workerThread, rtc::Thread::Current());
++      RTC_LOG(LS_VERBOSE) << "[addAudioSink] Dispatching to worker thread";
++    }
++    
++    _workerThread->BlockingCall(
++        [sink, self] { 
++          if (kRTCAudioSinkDebugLogging) {
++            NSLog(@"[RTCAudioTrack DEBUG] Now on worker thread");
++          }
++          [self addAudioSink:sink]; 
++        });
++    return;
++  }
++
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] On worker thread, checking for duplicates...");
++    NSLog(@"[RTCAudioTrack DEBUG] Current adapters count: %lu", 
++          (unsigned long)_adapters.count);
++  }
++
++  // Make sure we don't have this sink yet.
++  for (RTCAudioSinkAdapter *adapter in _adapters) {
++    if (adapter.audioSink == sink) {
++      if (kRTCAudioSinkDebugLogging) {
++        NSLog(@"[RTCAudioTrack DEBUG] Sink already attached, skipping");
++      }
++      RTC_LOG(LS_INFO) << "|sink| is already attached to this track";
++      return;
++    }
++  }
++  
++  // Create a wrapper that provides a native pointer for us.
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] Creating RTCAudioSinkAdapter...");
++  }
++  
++  RTCAudioSinkAdapter *adapter =
++      [[RTCAudioSinkAdapter alloc] initWithAudioSink:sink];
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] Adapter created: %p", adapter);
++    NSLog(@"[RTCAudioTrack DEBUG] Native sink pointer: %p", 
++          adapter.nativeAudioSink);
++  }
++  
++  [_adapters addObject:adapter];
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] Adding native sink to audio track...");
++    RTC_LOG(LS_VERBOSE) << "[addAudioSink] Calling native AddSink"
++                        << " - Native sink: " << adapter.nativeAudioSink;
++  }
++  
++  // === DETAILED PRE-ADDSINK VALIDATION ===
++  webrtc::scoped_refptr<webrtc::AudioTrackInterface> nativeTrack = self.nativeAudioTrack;
++  webrtc::AudioTrackSinkInterface* nativeSink = adapter.nativeAudioSink;
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] === PRE-ADDSINK VALIDATION ===");
++    NSLog(@"[RTCAudioTrack DEBUG] Native track pointer: %p", nativeTrack.get());
++    NSLog(@"[RTCAudioTrack DEBUG] Native sink pointer: %p", nativeSink);
++    
++    // Skip detailed checks - they cause crashes
++    NSLog(@"[RTCAudioTrack DEBUG] Skipping detailed validation to avoid crash");
++    
++    if (!nativeSink) {
++      NSLog(@"[RTCAudioTrack DEBUG] ❌ CRITICAL: nativeAudioSink is NULL!");
++    }
++    
++    NSLog(@"[RTCAudioTrack DEBUG] === DIRECT ADDSINK CALL ===");
++    RTC_LOG(LS_VERBOSE) << "[addAudioSink] Skipping detailed validation, calling AddSink directly";
++  }
++  
++  if (!nativeTrack.get()) {
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] ❌ Cannot call AddSink: nativeAudioTrack is NULL");
++    }
++    return;
++  }
++  
++  if (!nativeSink) {
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] ❌ Cannot call AddSink: nativeAudioSink is NULL");
++    }
++    return;
++  }
++  
++  // Direct AddSink call with exception handling
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] 🔄 DIRECT AddSink call starting...");
++  }
++  
++  @try {
++    nativeTrack->AddSink(nativeSink);
++    
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] ✅ AddSink call RETURNED successfully!");
++      RTC_LOG(LS_VERBOSE) << "[addAudioSink] AddSink call returned successfully";
++    }
++  } @catch (NSException* exception) {
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] ❌ Exception caught: %@", exception);
++      RTC_LOG(LS_ERROR) << "[addAudioSink] Exception: " 
++                        << [exception.description UTF8String];
++    }
++    return;
++  }
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] ✅ Audio sink successfully added!");
++    NSLog(@"[RTCAudioTrack DEBUG] Total adapters: %lu", 
++          (unsigned long)_adapters.count);
++    NSLog(@"[RTCAudioTrack DEBUG] ======== ADD AUDIO SINK END ========");
++    
++    RTC_LOG(LS_VERBOSE) << "[addAudioSink] Successfully added sink"
++                        << " - Total adapters: " << _adapters.count;
++  }
++}
++
++- (void)removeAudioSink:(id<RTC_OBJC_TYPE(RTCAudioSink)>)sink {
++  if (kRTCAudioSinkDebugLogging) {
++    NSString *sinkClassName = NSStringFromClass([sink class]);
++    NSLog(@"[RTCAudioTrack DEBUG] ======== REMOVE AUDIO SINK START ========");
++    NSLog(@"[RTCAudioTrack DEBUG] Removing sink class: %@", sinkClassName);
++    NSLog(@"[RTCAudioTrack DEBUG] Sink address: %p", sink);
++    RTC_LOG(LS_VERBOSE) << "[removeAudioSink] Called - Sink class: " 
++                        << [sinkClassName UTF8String];
++  }
++  
++  if (!_workerThread->IsCurrent()) {
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] Dispatching to worker thread for removal");
++    }
++    _workerThread->BlockingCall(
++        [sink, self] { [self removeAudioSink:sink]; });
++    return;
++  }
++  
++  __block NSUInteger indexToRemove = NSNotFound;
++  [_adapters enumerateObjectsUsingBlock:^(
++                 RTCAudioSinkAdapter *adapter, NSUInteger idx, BOOL *stop) {
++    if (adapter.audioSink == sink) {
++      indexToRemove = idx;
++      *stop = YES;
++    }
++  }];
++  
++  if (indexToRemove == NSNotFound) {
++    if (kRTCAudioSinkDebugLogging) {
++      NSLog(@"[RTCAudioTrack DEBUG] ⚠️ Sink not found in adapters");
++    }
++    RTC_LOG(LS_INFO) << "removeAudioSink called with a sink that has not "
++                        "been previously added";
++    return;
++  }
++  
++  RTCAudioSinkAdapter *adapterToRemove =
++      [_adapters objectAtIndex:indexToRemove];
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] Removing native sink from audio track...");
++    NSLog(@"[RTCAudioTrack DEBUG] Adapter to remove: %p", adapterToRemove);
++  }
++  
++  self.nativeAudioTrack->RemoveSink(adapterToRemove.nativeAudioSink);
++  [_adapters removeObjectAtIndex:indexToRemove];
++  
++  if (kRTCAudioSinkDebugLogging) {
++    NSLog(@"[RTCAudioTrack DEBUG] ✅ Audio sink successfully removed!");
++    NSLog(@"[RTCAudioTrack DEBUG] Remaining adapters: %lu", 
++          (unsigned long)_adapters.count);
++    NSLog(@"[RTCAudioTrack DEBUG] ======== REMOVE AUDIO SINK END ========");
++    RTC_LOG(LS_VERBOSE) << "[removeAudioSink] Successfully removed sink"
++                        << " - Remaining adapters: " << _adapters.count;
++  }
++}
++
+ #pragma mark - Private
+ 
+ - (webrtc::scoped_refptr<webrtc::AudioTrackInterface>)nativeAudioTrack {
