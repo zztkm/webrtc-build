@@ -1,0 +1,72 @@
+FROM ubuntu:22.04
+
+# 環境変数設定
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Tokyo
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PATH=/depot_tools:$PATH
+
+# タイムゾーン設定
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# grub-efi-amd64-signed のエラー回避
+RUN apt-mark hold grub-efi-amd64-signed 2>/dev/null || true
+
+# 基本パッケージのインストール
+RUN apt-get update --fix-missing && \
+    apt-get -y install \
+    binutils \
+    git \
+    locales \
+    lsb-release \
+    ninja-build \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    rsync \
+    sudo \
+    unzip \
+    vim \
+    wget \
+    xz-utils \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Java 11のインストール (Android SDK用)
+RUN apt-get update && \
+    apt-get -y install openjdk-11-jdk && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python 3.11のインストール
+RUN apt-get update && \
+    apt-get -y install software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get -y install python3.11 python3.11-distutils && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# depot_toolsのインストール
+RUN git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git /depot_tools
+
+# 作業ディレクトリの作成
+WORKDIR /workspace
+
+# ビルドに必要なファイルのコピー
+COPY run.py /workspace/run.py
+COPY patches/ /workspace/patches/
+COPY scripts/ /workspace/scripts/
+COPY VERSION /workspace/VERSION
+COPY DEPS /workspace/DEPS
+
+# _source, _build, _packageディレクトリの作成
+RUN mkdir -p /workspace/_source /workspace/_build /workspace/_package
+
+# Git設定
+RUN git config --global user.name "Docker Builder" && \
+    git config --global user.email "builder@docker.local"
+
+# デフォルトコマンド
+CMD ["/bin/bash"]

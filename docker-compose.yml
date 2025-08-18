@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  android-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.android
+    image: webrtc-android-builder:latest
+    container_name: webrtc-android-build
+    volumes:
+      # 読み取り専用でマウント
+      - ./run.py:/workspace/run.py:ro
+      - ./patches:/workspace/patches:ro
+      - ./scripts:/workspace/scripts:ro
+      - ./VERSION:/workspace/VERSION:ro
+      - ./DEPS:/workspace/DEPS:ro
+      # 成果物出力用（読み書き可能）
+      - ./_package:/workspace/_package
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - TZ=Asia/Tokyo
+    working_dir: /workspace
+    command: >
+      bash -c "
+        echo 'Starting Android WebRTC build...' &&
+        python3 run.py build android &&
+        python3 run.py package android &&
+        echo 'Build completed! Package available in _package/android/'
+      "
+    # メモリとCPUの制限（必要に応じて調整）
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          memory: 8G

@@ -1,0 +1,43 @@
+# ビルド成果物とソースコード（コンテナ内で管理）
+_build/
+_source/
+_package/
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ログ
+*.log
+
+# GitHub Actions
+.github/
+
+# Documentation (必要なVERSIONとDEPSは除外しない)
+CHANGES.md
+OLD_CHANGES.md
+DEVELOPMENT.md
+README.md
+LICENSE
+NOTICE
