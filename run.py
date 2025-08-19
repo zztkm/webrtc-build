@@ -268,10 +268,11 @@ PATCHES = {
         "h265_android.patch",
         "fix_perfetto.patch",
         "fix_moved_function_call.patch",
-        #"android_add_scale_resolution_down_to.patch",
+        "android_add_scale_resolution_down_to.patch",
         "remove_crel.patch",
         "revert_siso.patch",
         "android_include_environment_java.patch",
+        "android_log.patch",
     ],
     "raspberry-pi-os_armv6": [
         "nacl_armv6_2.patch",

@@ -1,0 +1,36 @@
+diff --git a/media/engine/webrtc_video_engine.cc b/media/engine/webrtc_video_engine.cc
+index 3a3d197cc6..b05b2eefbd 100644
+--- a/media/engine/webrtc_video_engine.cc
++++ b/media/engine/webrtc_video_engine.cc
+@@ -514,6 +514,7 @@ void FallbackToDefaultScalabilityModeIfNotSupported(
+     const Codec& codec,
+     const VideoSendStream::Config& config,
+     std::vector<RtpEncodingParameters>& encodings) {
++  RTC_LOG(LS_INFO) << "start FallbackToDefaultScalabilityModeIfNotSupported";
+   if (!absl::c_any_of(encodings,
+                       [](const webrtc::RtpEncodingParameters& encoding) {
+                         return encoding.scalability_mode &&
+@@ -524,6 +525,7 @@ void FallbackToDefaultScalabilityModeIfNotSupported(
+     return;
+   }
+   if (config.encoder_settings.encoder_factory == nullptr) {
++    RTC_LOG(LS_INFO) << "FallbackToDefaultScalabilityModeIfNotSupported: encoder_factory is nullptr";
+     return;
+   }
+   for (auto& encoding : encodings) {
+diff --git a/video/video_stream_encoder.cc b/video/video_stream_encoder.cc
+index 53125ff373..f3d040c2fe 100644
+--- a/video/video_stream_encoder.cc
++++ b/video/video_stream_encoder.cc
+@@ -987,9 +987,11 @@ void VideoStreamEncoder::ConfigureEncoder(VideoEncoderConfig config,
+     // Note: zero-hertz mode isn't enabled by this alone. Constraints also
+     // have to be set up with min_fps = 0 and max_fps > 0.
+     if (config.content_type == VideoEncoderConfig::ContentType::kScreen) {
++	  RTC_LOG(LS_INFO) << "call SetZeroHertzModeEnabled: FrameCadenceAdapterInterface::ZeroHertzModeParams{}";
+       frame_cadence_adapter_->SetZeroHertzModeEnabled(
+           FrameCadenceAdapterInterface::ZeroHertzModeParams{});
+     } else {
++	  RTC_LOG(LS_INFO) << "call SetZeroHertzModeEnabled: std::nullopt";
+       frame_cadence_adapter_->SetZeroHertzModeEnabled(std::nullopt);
+     }
+ 
