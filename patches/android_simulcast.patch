@@ -1,5 +1,5 @@
 diff --git a/pc/rtp_transceiver.cc b/pc/rtp_transceiver.cc
-index dadc9de064..f0cb655da4 100644
+index dadc9de064..d76320ea26 100644
 --- a/pc/rtp_transceiver.cc
 +++ b/pc/rtp_transceiver.cc
 @@ -46,6 +46,7 @@
@@ -10,7 +10,7 @@ index dadc9de064..f0cb655da4 100644
  #include "pc/channel.h"
  #include "pc/channel_interface.h"
  #include "pc/codec_vendor.h"
-@@ -146,10 +147,35 @@ RtpTransceiver::RtpTransceiver(
+@@ -146,10 +147,38 @@ RtpTransceiver::RtpTransceiver(
    RTC_DCHECK(media_type_ == MediaType::AUDIO ||
               media_type_ == MediaType::VIDEO);
    RTC_DCHECK_EQ(sender->media_type(), receiver->media_type());
@@ -18,33 +18,36 @@ index dadc9de064..f0cb655da4 100644
 -      sender->media_type() == MediaType::VIDEO
 -          ? codec_vendor().video_send_codecs().codecs()
 -          : codec_vendor().audio_send_codecs().codecs());
-+  // Get initial codec list and fix missing scalability modes
++
++  // codec_vendor() の静的コーデックリストには scalability_modes 情報が欠落しており、
++  // VP8=0個、VP9=0個、AV1=0 個の状態で CheckScalabilityModeValues が失敗していた。
++  // その結果、サイマルキャスト使用時に映像が r0 の 1 本しか Sora に送られていなかったため、
++  // InternalEncoderFactoryから正しい情報を取得して補完する必要がある。
++  // (VP8 はそれでもサイマルキャストできていたけどこれはソフトウェアエンコーダーだからだろうか？)。
 +  std::vector<Codec> send_codecs = sender->media_type() == MediaType::VIDEO
 +      ? codec_vendor().video_send_codecs().codecs()
 +      : codec_vendor().audio_send_codecs().codecs();
-+      
-+  // Fix missing scalability modes for known codecs by getting from InternalEncoderFactory
++
 +  if (sender->media_type() == MediaType::VIDEO) {
-+    // Create InternalEncoderFactory to get correct scalability modes
++    // InternalEncoderFactory は正しい scalability_modes 情報を持っているため
++    // この情報で静的リストを補完する
 +    InternalEncoderFactory internal_factory;
 +    std::vector<SdpVideoFormat> supported_formats = internal_factory.GetSupportedFormats();
-+    
-+    RTC_LOG(LS_INFO) << "[kensaku] RtpTransceiver: InternalEncoderFactory provided " << supported_formats.size() << " formats";
-+    
++
 +    for (auto& codec : send_codecs) {
 +      if (codec.scalability_modes.empty()) {
 +        // Find matching format from InternalEncoderFactory
 +        auto format_it = absl::c_find_if(supported_formats, [&codec](const SdpVideoFormat& format) {
 +          return format.name == codec.name;
 +        });
-+        
++
 +        if (format_it != supported_formats.end() && !format_it->scalability_modes.empty()) {
 +          codec.scalability_modes = format_it->scalability_modes;
 +        }
 +      }
 +    }
 +  }
-+  
++
 +  // Set codecs once with corrected scalability modes
 +  sender->internal()->SetSendCodecs(send_codecs);
    senders_.push_back(sender);
