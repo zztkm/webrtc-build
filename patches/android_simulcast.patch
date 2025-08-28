@@ -1,8 +1,60 @@
+diff --git a/pc/rtp_transceiver.cc b/pc/rtp_transceiver.cc
+index dadc9de064..f0cb655da4 100644
+--- a/pc/rtp_transceiver.cc
++++ b/pc/rtp_transceiver.cc
+@@ -46,6 +46,7 @@
+ #include "media/base/media_channel.h"
+ #include "media/base/media_config.h"
+ #include "media/base/media_engine.h"
++#include "media/engine/internal_encoder_factory.h"
+ #include "pc/channel.h"
+ #include "pc/channel_interface.h"
+ #include "pc/codec_vendor.h"
+@@ -146,10 +147,35 @@ RtpTransceiver::RtpTransceiver(
+   RTC_DCHECK(media_type_ == MediaType::AUDIO ||
+              media_type_ == MediaType::VIDEO);
+   RTC_DCHECK_EQ(sender->media_type(), receiver->media_type());
+-  sender->internal()->SetSendCodecs(
+-      sender->media_type() == MediaType::VIDEO
+-          ? codec_vendor().video_send_codecs().codecs()
+-          : codec_vendor().audio_send_codecs().codecs());
++  // Get initial codec list and fix missing scalability modes
++  std::vector<Codec> send_codecs = sender->media_type() == MediaType::VIDEO
++      ? codec_vendor().video_send_codecs().codecs()
++      : codec_vendor().audio_send_codecs().codecs();
++      
++  // Fix missing scalability modes for known codecs by getting from InternalEncoderFactory
++  if (sender->media_type() == MediaType::VIDEO) {
++    // Create InternalEncoderFactory to get correct scalability modes
++    InternalEncoderFactory internal_factory;
++    std::vector<SdpVideoFormat> supported_formats = internal_factory.GetSupportedFormats();
++    
++    RTC_LOG(LS_INFO) << "[kensaku] RtpTransceiver: InternalEncoderFactory provided " << supported_formats.size() << " formats";
++    
++    for (auto& codec : send_codecs) {
++      if (codec.scalability_modes.empty()) {
++        // Find matching format from InternalEncoderFactory
++        auto format_it = absl::c_find_if(supported_formats, [&codec](const SdpVideoFormat& format) {
++          return format.name == codec.name;
++        });
++        
++        if (format_it != supported_formats.end() && !format_it->scalability_modes.empty()) {
++          codec.scalability_modes = format_it->scalability_modes;
++        }
++      }
++    }
++  }
++  
++  // Set codecs once with corrected scalability modes
++  sender->internal()->SetSendCodecs(send_codecs);
+   senders_.push_back(sender);
+   receivers_.push_back(receiver);
+ 
 diff --git a/sdk/android/BUILD.gn b/sdk/android/BUILD.gn
-index 8858d21b60..3911b834e1 100644
+index c7e3324a35..044dac1e7c 100644
 --- a/sdk/android/BUILD.gn
 +++ b/sdk/android/BUILD.gn
-@@ -528,6 +529,8 @@ if (is_android) {
+@@ -567,6 +567,8 @@ if (is_android) {
      sources = [
        "api/org/webrtc/SoftwareVideoDecoderFactory.java",
        "api/org/webrtc/SoftwareVideoEncoderFactory.java",
@@ -11,7 +63,7 @@ index 8858d21b60..3911b834e1 100644
      ]
  
      deps = [
-@@ -874,6 +877,23 @@ if (current_os == "linux" || is_android) {
+@@ -928,6 +930,23 @@ if (current_os == "linux" || is_android) {
      ]
    }
  
@@ -35,7 +87,7 @@ index 8858d21b60..3911b834e1 100644
    rtc_library("libaom_av1_encoder_jni") {
      visibility = [ "*" ]
      allow_poison = [ "software_video_codecs" ]
-@@ -911,6 +931,7 @@ if (current_os == "linux" || is_android) {
+@@ -965,6 +984,7 @@ if (current_os == "linux" || is_android) {
        ":generated_swcodecs_jni",
        ":libvpx_vp8_jni",
        ":libvpx_vp9_jni",
@@ -117,7 +169,7 @@ index 0000000000..1bea910fae
 +}
 diff --git a/sdk/android/api/org/webrtc/SimulcastVideoEncoderFactory.java b/sdk/android/api/org/webrtc/SimulcastVideoEncoderFactory.java
 new file mode 100644
-index 0000000000..21339f8349
+index 0000000000..de1d8086fe
 --- /dev/null
 +++ b/sdk/android/api/org/webrtc/SimulcastVideoEncoderFactory.java
 @@ -0,0 +1,50 @@
@@ -215,7 +267,7 @@ index 4f97cf74cf..7e57d3fa4c 100644
 +  }
  }
 diff --git a/sdk/android/src/jni/pc/rtp_parameters.cc b/sdk/android/src/jni/pc/rtp_parameters.cc
-index 4bd9ee0e1d..dfc7f17f6d 100644
+index c83ea8599c..96d9709884 100644
 --- a/sdk/android/src/jni/pc/rtp_parameters.cc
 +++ b/sdk/android/src/jni/pc/rtp_parameters.cc
 @@ -53,6 +53,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaRtpEncodingParameter(
@@ -240,7 +292,7 @@ index 4bd9ee0e1d..dfc7f17f6d 100644
    ScopedJavaLocalRef<jobject> j_ssrc =
 diff --git a/sdk/android/src/jni/simulcast_video_encoder.cc b/sdk/android/src/jni/simulcast_video_encoder.cc
 new file mode 100644
-index 0000000000..3f0ca5331c
+index 0000000000..007c9f4ce4
 --- /dev/null
 +++ b/sdk/android/src/jni/simulcast_video_encoder.cc
 @@ -0,0 +1,35 @@
