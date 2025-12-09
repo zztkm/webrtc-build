@@ -25,9 +25,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - run: git version
       - run: git config --get core.autocrlf
       # global は失敗する
       # - run: git config --global --get core.autocrlf
+      - run: git config --global core.autocrlf input
       - run: python3 --version
       - name: Disk Cleanup
         run: |
