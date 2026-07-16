@@ -418,3 +418,46 @@ libwebrtc 本体の `PeerConnectionInterface::IceServer::tls_client_identity` �
 `tls_client_identity` を生成する。
 
 `IceServer.toString()` には、秘密鍵や証明書 PEM は出力しない。
+
+## android_jni_zero_jar.patch
+
+libwebrtc M149 から、`org.jni_zero.JniZero.setJniClassLoader()` は `JniZeroJni.get().setJniClassLoader()` を呼び出す。
+従来の Android 向け `libwebrtc.jar` には `JniZeroJni.class` が含まれていないため、R8 が `JniZero` の参照を解決すると Missing class エラーになる。
+
+JNI Zero の `generate_jni` は、個別の `*Jni` クラスとコンパイル用 placeholder `GEN_JNI` を生成する。
+placeholder `GEN_JNI` は jar から除外する前提であり、release build で使うハッシュ化 JNI symbol の宣言を持たない。
+最終成果物には、Java / native の依存グラフから `generate_jni_registration` が生成する `GEN_JNI` と `J/N` が必要である。
+
+このパッチは、`sdk/android:libwebrtc` の Java 依存を共通のリストにまとめ、同じリストと `libjingle_peerconnection_so` から最終 JNI registration を生成する。
+配布する Java API には、この native library 構成で実装を持たない optional codec も含まれるため、JNI Zero に不足する JNI の Java stub を生成させる。
+同時に、Java 側から呼ばれない native method は最終 registration から除外する。
+生成した srcjar を専用の Java library でコンパイルし、`dist_jar` の直接依存に追加する。
+さらに、`JniZeroJni.class` を含めるため、`third_party/jni_zero:generate_jni_java` も直接依存に追加する。
+
+Android 向け `webrtc.jar` には次のクラスが含まれる。
+
+- `org.jni_zero.JniZero`
+- `org.jni_zero.JniZero$Natives`
+- `org.jni_zero.JniZeroJni`
+- `org.jni_zero.GEN_JNI`
+- `J.N`
+
+`GEN_JNI.class` は placeholder ではなく、`J.N` のハッシュ化 native method へ転送する最終 registration クラスである。
+パッチは `android` に適用し、`webrtc.android.tar.gz` 内の `jar/webrtc.jar` に反映する。
+
+検証時は次を確認する。
+
+```sh
+python3 run.py build android
+python3 run.py package android
+
+work_dir="$(mktemp -d)"
+tar -xOf _package/android/webrtc.android.tar.gz webrtc/jar/webrtc.jar > "$work_dir/webrtc.jar"
+unzip -Z1 "$work_dir/webrtc.jar" | grep -E '^(org/jni_zero/(JniZero(\$Natives)?|JniZeroJni|GEN_JNI)|J/N)\.class$'
+javap -classpath "$work_dir/webrtc.jar" org.jni_zero.GEN_JNI | grep 'org_jni_1zero_JniZero_setJniClassLoader'
+javap -classpath "$work_dir/webrtc.jar" -c org.jni_zero.GEN_JNI | grep 'J/N'
+
+rm -rf "$work_dir"
+```
+
+取り出した `webrtc.jar` に上記 5 クラスが含まれ、`GEN_JNI` が `J/N` を呼び出すことを確認する。

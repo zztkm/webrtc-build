@@ -289,6 +289,7 @@ PATCHES = {
         "turn_tls_client_certificate.patch",
         "android_turn_tls_client_certificate.patch",
         "android_rtp_receiver_get_streams.patch",
+        "android_jni_zero_jar.patch",
     ],
     "android_sdk": [
         "add_deps.patch",

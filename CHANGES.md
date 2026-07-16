@@ -29,6 +29,10 @@ VERSION ファイルを上げただけの場合は変更履歴記録は不要。
 
 ## タイムライン
 
+- 2026-07-16 [FIX] Android 向け webrtc.jar を JNI Zero の最終 registration 構成に追従する
+  - `JniZeroJni.class`、最終 `GEN_JNI.class`、`J/N.class` を含める
+  - GitHub Actions を Android target の検証用ビルドに限定する
+  - @zztkm
 - 2026-06-23 [RELEASE] m150.7871.3.0
   - @torikizi
 - 2026-06-17 [RELEASE] m150.7871.2.1
